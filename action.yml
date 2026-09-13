@@ -1,6 +1,9 @@
 name: pr-analysis
 description: Revisor de PRs
 inputs:
+  anthropic-api-key:
+    description: API key da Anthropic
+    required: true
   ignore-paths:
     description: Globs de paths a ignorar, um por linha
     required: false
@@ -57,3 +60,16 @@ runs:
       run: |
         git diff "$BASE...$HEAD" -- $(cat "$FILES") > "$RUNNER_TEMP/diff.patch"
         wc -l "$RUNNER_TEMP/diff.patch"
+
+    - name: Install Claude Code
+      shell: bash
+      run: npm install -g @anthropic-ai/claude-code
+
+    - name: Claude smoke test
+      shell: bash
+      env:
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+      run: |
+        claude -p "Responda exatamente: ok" \
+          --max-turns 1 \
+          --output-format json
