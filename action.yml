@@ -1,0 +1,12 @@
+name: pr-analysis
+description: Revisor de PRs
+inputs:
+  greeting:
+    description: descricao do campo greeting
+    required: false
+    default: default descricao do campo greeting
+runs:
+  using: "composite"
+  steps:
+    run: echo ${{ inputs.greeting }}
+    shell: bash
