@@ -1,13 +1,21 @@
 name: pr-analysis
 description: Revisor de PRs
+
 inputs:
+  model:
+    description: Modelo a usar na análise
+    required: false
+    default: claude-sonnet-4-6
+
   anthropic-api-key:
     description: API key da Anthropic
     required: true
+
   ignore-paths:
     description: Globs de paths a ignorar, um por linha
     required: false
     default: ''
+
 runs:
   using: "composite"
   steps:
@@ -96,11 +104,12 @@ runs:
     - name: Run review
       if: steps.filter.outputs.has_files == 'true'
       shell: bash
-      timeout-minutes: 10
       env:
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        MODEL: ${{ inputs.model }}
       run: |
-        claude -p "$(cat "$RUNNER_TEMP/prompt.txt")" \
+        timeout 600 claude -p "$(cat "$RUNNER_TEMP/prompt.txt")" \
+          --model "$MODEL" \
           --allowedTools "Read,Grep,Glob" \
           --permission-mode dontAsk \
           --max-turns 5 \
