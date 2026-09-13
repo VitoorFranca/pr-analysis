@@ -188,8 +188,18 @@ runs:
           fi
 
           echo
-          echo "_Severidade máxima: $MAX · Limiar: $LIMIT_"
+          echo "_Severidade máxima: $MAX · Limiar: ${LIMIT}_"
+          echo "_Limiar configurado: ${THRESHOLD}_"
         } > "$BODY"
 
         echo "body=$BODY" >> "$GITHUB_OUTPUT"
         cat "$BODY"
+    - name: Comment on PR
+      if: steps.filter.outputs.has_files == 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        BODY: ${{ steps.review.outputs.body }}
+      run: |
+        gh pr comment "$PR_NUMBER" --body-file "$BODY"
