@@ -8,6 +8,10 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
     - name: Show PR info
       run: |
         echo "Base branch: ${{ github.event.pull_request.base.ref }}"
