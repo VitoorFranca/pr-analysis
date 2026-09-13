@@ -8,6 +8,12 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: Show PR info
+      run: |
+        echo "Base branch: ${{ github.event.pull_request.base.ref }}"
+        echo "Base SHA:    ${{ github.event.pull_request.base.sha }}"
+        echo "Head branch: ${{ github.event.pull_request.head.ref }}"
+        echo "Head SHA:    ${{ github.event.pull_request.head.sha }}"
     - name: Greeting
       run: echo ${{ inputs.greeting }}
       shell: bash
