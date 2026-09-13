@@ -1,12 +1,8 @@
 name: pr-analysis
 description: Revisor de PRs
 inputs:
-  greeting:
-    description: descricao do campo greeting
-    required: false
-    default: default descricao do campo greeting
   ignore-paths:
-    description: Paths que devem ser ignorados
+    description: Globs de paths a ignorar, um por linha
     required: false
     default: ''
 runs:
@@ -16,50 +12,48 @@ runs:
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
-    - name: Filter ignored paths
+
+    - name: Collect and filter changed files
+      id: filter
       shell: bash
+      env:
+        BASE: ${{ github.event.pull_request.base.sha }}
+        HEAD: ${{ github.event.pull_request.head.sha }}
+        IGNORE_PATHS: ${{ inputs.ignore-paths }}
       run: |
-        BASE="${{ github.event.pull_request.base.sha }}"
-        HEAD="${{ github.event.pull_request.head.sha }}"
+        CHANGED="$RUNNER_TEMP/changed.txt"
+        PATTERNS="$RUNNER_TEMP/patterns.txt"
+        IGNORED="$RUNNER_TEMP/ignored.txt"
+        FILTERED="$RUNNER_TEMP/filtered.txt"
 
-        git diff --name-only "$BASE...$HEAD" > changed-files.txt
+        git diff --name-only "$BASE...$HEAD" > "$CHANGED"
 
-        echo "ANTES:"
-        cat changed-files.txt
+        printf '%s\n' "$IGNORE_PATHS" | grep -v '^[[:space:]]*$' > "$PATTERNS" || true
 
-        printf '%s\n' "${{ inputs.ignore-paths }}" > ignore-patterns.txt
-
-        if [ -s ignore-patterns.txt ]; then
-          git ls-files \
-            --cached \
-            --ignored \
-            --exclude-from=ignore-patterns.txt \
-            > ignored-files.txt
-
-          grep -Fvx -f ignored-files.txt changed-files.txt > filtered-files.txt || true
+        if [ -s "$PATTERNS" ]; then
+          git ls-files --cached --ignored --exclude-from="$PATTERNS" > "$IGNORED"
+          grep -Fvx -f "$IGNORED" "$CHANGED" > "$FILTERED" || true
         else
-          cp changed-files.txt filtered-files.txt
+          cp "$CHANGED" "$FILTERED"
         fi
 
-        echo "DEPOIS:"
-        cat filtered-files.txt
-    - name: Show PR info
-      run: |
-        echo "Base branch: ${{ github.event.pull_request.base.ref }}"
-        echo "Base SHA:    ${{ github.event.pull_request.base.sha }}"
-        echo "Head branch: ${{ github.event.pull_request.head.ref }}"
-        echo "Head SHA:    ${{ github.event.pull_request.head.sha }}"
-        git cat-file -e "${{ github.event.pull_request.base.sha }}^{commit}" \
-          && echo "base OK" \
-          || echo "base AUSENTE"
+        if [ -s "$FILTERED" ]; then
+          echo "has_files=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "has_files=false" >> "$GITHUB_OUTPUT"
+        fi
 
-        git cat-file -e "${{ github.event.pull_request.head.sha }}^{commit}" \
-          && echo "head OK" \
-          || echo "head AUSENTE"
-          
-        git diff --name-only \
-          "${{ github.event.pull_request.base.sha }}"..."${{ github.event.pull_request.head.sha }}"
+        echo "files=$FILTERED" >> "$GITHUB_OUTPUT"
+        echo "Arquivos a revisar:"
+        cat "$FILTERED"
+
+    - name: Build diff
+      if: steps.filter.outputs.has_files == 'true'
       shell: bash
-    - name: Greeting
-      run: echo ${{ inputs.greeting }}
-      shell: bash
+      env:
+        BASE: ${{ github.event.pull_request.base.sha }}
+        HEAD: ${{ github.event.pull_request.head.sha }}
+        FILES: ${{ steps.filter.outputs.files }}
+      run: |
+        git diff "$BASE...$HEAD" -- $(cat "$FILES") > "$RUNNER_TEMP/diff.patch"
+        wc -l "$RUNNER_TEMP/diff.patch"
