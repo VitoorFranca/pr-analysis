@@ -130,6 +130,7 @@ runs:
         RAW="$RUNNER_TEMP/raw.json"
         VERDICT="$RUNNER_TEMP/verdict.json"
         THRESHOLD="${{ inputs.severity-threshold }}"
+        BODY="$RUNNER_TEMP/review.md"
 
         if [ "$(jq -r '.is_error' "$RAW")" != "false" ]; then
           echo "Execução falhou"; exit 1
@@ -170,3 +171,25 @@ runs:
         else
           echo "should_block=false" >> "$GITHUB_OUTPUT"
         fi
+
+        {
+          echo "## Revisão automatizada"
+          echo
+          jq -r '.summary' "$VERDICT"
+          echo
+
+          COUNT=$(jq '.findings | length' "$VERDICT")
+          if [ "$COUNT" -eq 0 ]; then
+            echo "Nenhum problema encontrado."
+          else
+            echo "### Achados ($COUNT)"
+            echo
+            jq -r '.findings[] | "- **\(.severity)** `\(.file):\(.line)` — \(.message)"' "$VERDICT"
+          fi
+
+          echo
+          echo "_Severidade máxima: $MAX · Limiar: $LIMIT_"
+        } > "$BODY"
+
+        echo "body=$BODY" >> "$GITHUB_OUTPUT"
+        cat "$BODY"
