@@ -194,6 +194,7 @@ runs:
 
         echo "body=$BODY" >> "$GITHUB_OUTPUT"
         cat "$BODY"
+
     - name: Comment on PR
       if: steps.filter.outputs.has_files == 'true'
       shell: bash
@@ -203,3 +204,15 @@ runs:
         BODY: ${{ steps.review.outputs.body }}
       run: |
         gh pr comment "$PR_NUMBER" --body-file "$BODY"
+
+    - name: Enforce verdict
+      if: steps.filter.outputs.has_files == 'true'
+      shell: bash
+      env:
+        SHOULD_BLOCK: ${{ steps.review.outputs.should_block }}
+      run: |
+        if [ "$SHOULD_BLOCK" = "true" ]; then
+          echo "Achados acima do limiar. Reprovando."
+          exit 1
+        fi
+        echo "Nenhum achado acima do limiar."
