@@ -16,6 +16,11 @@ inputs:
     required: false
     default: ''
 
+  severity-threshold:
+    description: Severidade mínima que reprova o PR
+    required: false
+    default: high
+
 runs:
   using: "composite"
   steps:
@@ -124,6 +129,7 @@ runs:
       run: |
         RAW="$RUNNER_TEMP/raw.json"
         VERDICT="$RUNNER_TEMP/verdict.json"
+        THRESHOLD="${{ inputs.severity-threshold }}"
 
         if [ "$(jq -r '.is_error' "$RAW")" != "false" ]; then
           echo "Execução falhou"; exit 1
@@ -138,3 +144,29 @@ runs:
         fi
 
         jq -r '.findings[].severity' "$VERDICT" | sort -u
+
+        rank() {
+          case "$1" in
+            critical) echo 4 ;;
+            high)     echo 3 ;;
+            medium)   echo 2 ;;
+            low)      echo 1 ;;
+            *)        echo 0 ;;
+          esac
+        }
+
+        MAX=0
+        while read -r sev; do
+          R=$(rank "$sev")
+          [ "$R" -gt "$MAX" ] && MAX="$R"
+        done < <(jq -r '.findings[].severity' "$VERDICT")
+
+        LIMIT=$(rank "$THRESHOLD")
+
+        echo "Severidade máxima: $MAX | Limiar: $LIMIT"
+
+        if [ "$MAX" -ge "$LIMIT" ] && [ "$LIMIT" -gt 0 ]; then
+          echo "should_block=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "should_block=false" >> "$GITHUB_OUTPUT"
+        fi
