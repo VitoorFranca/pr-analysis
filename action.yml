@@ -5,6 +5,10 @@ inputs:
     description: descricao do campo greeting
     required: false
     default: default descricao do campo greeting
+  ignore-paths:
+    description: Paths que devem ser ignorados
+    required: false
+    default: ''
 runs:
   using: "composite"
   steps:
@@ -12,6 +16,33 @@ runs:
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
+    - name: Filter ignored paths
+      shell: bash
+      run: |
+        BASE="${{ github.event.pull_request.base.sha }}"
+        HEAD="${{ github.event.pull_request.head.sha }}"
+
+        git diff --name-only "$BASE...$HEAD" > changed-files.txt
+
+        echo "ANTES:"
+        cat changed-files.txt
+
+        printf '%s\n' "${{ inputs.ignore-paths }}" > ignore-patterns.txt
+
+        if [ -s ignore-patterns.txt ]; then
+          git ls-files \
+            --cached \
+            --ignored \
+            --exclude-from=ignore-patterns.txt \
+            > ignored-files.txt
+
+          grep -Fvx -f ignored-files.txt changed-files.txt > filtered-files.txt || true
+        else
+          cp changed-files.txt filtered-files.txt
+        fi
+
+        echo "DEPOIS:"
+        cat filtered-files.txt
     - name: Show PR info
       run: |
         echo "Base branch: ${{ github.event.pull_request.base.ref }}"
