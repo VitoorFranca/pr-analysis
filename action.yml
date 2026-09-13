@@ -14,6 +14,8 @@ runs:
         echo "Base SHA:    ${{ github.event.pull_request.base.sha }}"
         echo "Head branch: ${{ github.event.pull_request.head.ref }}"
         echo "Head SHA:    ${{ github.event.pull_request.head.sha }}"
+        git cat-file -e <base-sha>^{commit} && echo "base OK" || echo "base AUSENTE"
+        git cat-file -e <head-sha>^{commit} && echo "head OK" || echo "head AUSENTE"
       shell: bash
     - name: Greeting
       run: echo ${{ inputs.greeting }}
