@@ -117,3 +117,24 @@ runs:
           > "$RUNNER_TEMP/raw.json"
 
         cat "$RUNNER_TEMP/raw.json"
+    - name: Parse review
+      id: review
+      if: steps.filter.outputs.has_files == 'true'
+      shell: bash
+      run: |
+        RAW="$RUNNER_TEMP/raw.json"
+        VERDICT="$RUNNER_TEMP/verdict.json"
+
+        if [ "$(jq -r '.is_error' "$RAW")" != "false" ]; then
+          echo "Execução falhou"; exit 1
+        fi
+
+        jq -r '.result' "$RAW" \
+          | sed 's/^```json//; s/^```//; s/```$//' \
+          > "$VERDICT"
+
+        if ! jq -e '.findings | type == "array"' "$VERDICT" > /dev/null 2>&1; then
+          echo "Veredito inválido:"; cat "$VERDICT"; exit 1
+        fi
+
+        jq -r '.findings[].severity' "$VERDICT" | sort -u
