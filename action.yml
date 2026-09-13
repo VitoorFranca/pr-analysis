@@ -25,6 +25,9 @@ runs:
         git cat-file -e "${{ github.event.pull_request.head.sha }}^{commit}" \
           && echo "head OK" \
           || echo "head AUSENTE"
+          
+        git diff --name-only \
+          "${{ github.event.pull_request.base.sha }}"..."${{ github.event.pull_request.head.sha }}"
       shell: bash
     - name: Greeting
       run: echo ${{ inputs.greeting }}
