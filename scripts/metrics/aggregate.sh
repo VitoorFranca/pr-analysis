@@ -18,8 +18,13 @@ done
 
 jq -s '.' "$OUT"/*/metrics.json > all-metrics.json
 
-jq '{
+jq 'group_by(.model) | map({
+  model: .[0].model,
   execucoes: length,
   custo_total_usd: (map(.claude_cost_usd) | add),
   custo_medio_usd: (map(.claude_cost_usd) | add / length)
-}' all-metrics.json
+})' all-metrics.json
+
+COLETA_MODEL="${2:-claude-sonnet-4-6}"
+jq --arg m "$COLETA_MODEL" '[.[] | select(.model == $m)]' all-metrics.json > shadow.json
+echo "shadow.json: $(jq length shadow.json) execuções com $COLETA_MODEL"
