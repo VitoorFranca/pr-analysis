@@ -11,6 +11,16 @@ inputs:
     description: API key da Anthropic
     required: true
 
+  typesafe-api-key:
+    description: API key da TypeSafe
+    required: false
+    default: ''
+
+  jev-model:
+    description: Versão do Jev
+    required: false
+    default: jev-1.13.0
+
   ignore-paths:
     description: Globs de paths a ignorar, um por linha
     required: false
@@ -73,6 +83,62 @@ runs:
       run: |
         git diff "$BASE...$HEAD" -- $(cat "$FILES") > "$RUNNER_TEMP/diff.patch"
         wc -l "$RUNNER_TEMP/diff.patch"
+
+    - name: Jev triage (shadow)
+      if: steps.filter.outputs.has_files == 'true' && inputs.typesafe-api-key != ''
+      continue-on-error: true
+      shell: bash
+      env:
+        TYPESAFE_API_KEY: ${{ inputs.typesafe-api-key }}
+        JEV_MODEL: ${{ inputs.jev-model }}
+        BASE: ${{ github.event.pull_request.base.sha }}
+        HEAD: ${{ github.event.pull_request.head.sha }}
+        FILES: ${{ steps.filter.outputs.files }}
+      run: |
+        TRIAGE="$RUNNER_TEMP/triage.jsonl"
+        : > "$TRIAGE"
+
+        while read -r file; do
+          [ -z "$file" ] && continue
+
+          DIFF=$(git diff "$BASE...$HEAD" -- "$file" | head -c 60000)
+
+          REQ=$(jq -n --arg model "$JEV_MODEL" --arg file "$file" --arg diff "$DIFF" '{
+            model: $model,
+            state: { file: $file, diff: $diff },
+            questions: {
+              risk: {
+                type: "score",
+                instructions: "Risk that the change in `diff` introduces a security vulnerability, credential exposure, or correctness bug.",
+                criteria: [
+                  "Trivial: docs, formatting, copy or config with no behavior impact",
+                  "Low: small logic change with limited blast radius",
+                  "Medium: changes business logic, validation or data handling",
+                  "High: touches auth, secrets, input handling, queries or permissions"
+                ]
+              }
+            }
+          }')
+
+          if RESP=$(curl -sS --fail-with-body --max-time 30 --retry 3 \
+                -X POST https://api.typesafe.ai/v1/systemone \
+                -H "Authorization: Bearer $TYPESAFE_API_KEY" \
+                -H "Content-Type: application/json" \
+                -d "$REQ"); then
+            echo "$RESP" | jq -c --arg f "$file" '{
+              file: $f,
+              risk: .answers.risk.score,
+              confidence: .answers.risk.confidence,
+              input_tokens: .usage.input_tokens
+            }' >> "$TRIAGE"
+          else
+            echo "Jev falhou para $file: $RESP"
+            jq -nc --arg f "$file" '{file: $f, error: true}' >> "$TRIAGE"
+          fi
+        done < "$FILES"
+
+        jq -s '.' "$TRIAGE" > "$RUNNER_TEMP/triage.json"
+        cat "$RUNNER_TEMP/triage.json"
 
     - name: Build prompt
       if: steps.filter.outputs.has_files == 'true'
@@ -225,11 +291,14 @@ runs:
         MODEL: ${{ inputs.model }}
         HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       run: |
+        [ -f "$RUNNER_TEMP/triage.json" ] || echo '[]' > "$RUNNER_TEMP/triage.json"
+
         jq --arg pr "$PR_NUMBER" \
            --arg repo "$GITHUB_REPOSITORY" \
            --arg sha "$HEAD_SHA" \
            --arg model "$MODEL" \
            --slurpfile verdict "$RUNNER_TEMP/verdict.json" \
+           --slurpfile triage "$RUNNER_TEMP/triage.json" \
           '{
             repo: $repo,
             pr: ($pr | tonumber),
@@ -238,7 +307,8 @@ runs:
             claude_cost_usd: .total_cost_usd,
             num_turns: .num_turns,
             duration_ms: .duration_ms,
-            findings: $verdict[0].findings
+            findings: $verdict[0].findings,
+            triage: $triage[0]
           }' "$RUNNER_TEMP/raw.json" > "$RUNNER_TEMP/metrics.json"
 
         {
