@@ -256,28 +256,6 @@ runs:
         path: ${{ runner.temp }}/metrics.json
         retention-days: 90
         if-no-files-found: ignore
-      if: always() && steps.filter.outputs.has_files == 'true'
-      uses: actions/upload-artifact@v4
-      with:
-        name: pr-metrics-${{ github.event.pull_request.number }}-${{ github.run_id }}-${{ github.run_attempt }}
-        path: ${{ runner.temp }}/metrics.json
-        retention-days: 90
-        if-no-files-found: ignore
-      if: steps.filter.outputs.has_files == 'true'
-      shell: bash
-      run: |
-        jq '{
-          claude_cost_usd: .total_cost_usd,
-          num_turns: .num_turns,
-          duration_ms: .duration_ms
-        }' "$RUNNER_TEMP/raw.json" > "$RUNNER_TEMP/metrics.json"
-
-        {
-          echo "### Métricas"
-          echo '```json'
-          cat "$RUNNER_TEMP/metrics.json"
-          echo '```'
-        } >> "$GITHUB_STEP_SUMMARY"
 
     - name: Split findings
       id: split
