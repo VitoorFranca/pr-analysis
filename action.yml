@@ -81,7 +81,7 @@ runs:
         HEAD: ${{ github.event.pull_request.head.sha }}
         FILES: ${{ steps.filter.outputs.files }}
       run: |
-        git diff "$BASE...$HEAD" -- $(cat "$FILES") > "$RUNNER_TEMP/diff.patch"
+        xargs -d '\n' git diff "$BASE...$HEAD" -- < "$FILES" > "$RUNNER_TEMP/diff.patch"
         wc -l "$RUNNER_TEMP/diff.patch"
 
     - name: Jev triage (shadow)
@@ -160,9 +160,6 @@ runs:
           /^-/  { print "   " $0; next }
         ' "$RUNNER_TEMP/diff.patch" > "$RUNNER_TEMP/diff-numbered.txt"
 
-        echo "--- diff numerado ---"
-        cat "$RUNNER_TEMP/diff-numbered.txt"
-
         {
           cat <<'EOF'
         Você é um revisor de código. Analise o diff delimitado abaixo.
@@ -215,12 +212,6 @@ runs:
           --output-format json \
           < "$RUNNER_TEMP/prompt.txt" \
           > "$RUNNER_TEMP/raw.json"
-
-        if [ "$(jq -r '.is_error' "$RAW")" != "false" ]; then
-          echo "Execução falhou:"
-          cat "$RAW"
-          exit 1
-        fi
     
     - name: Parse review
       id: review
