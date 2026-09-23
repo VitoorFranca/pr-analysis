@@ -28,3 +28,5 @@ jq 'group_by(.model) | map({
 COLETA_MODEL="${2:-claude-sonnet-4-6}"
 jq --arg m "$COLETA_MODEL" '[.[] | select(.model == $m)]' all-metrics.json > shadow.json
 echo "shadow.json: $(jq length shadow.json) execuções com $COLETA_MODEL"
+
+bash "$(dirname "$0")/report.sh" all-metrics.json metrics-report.html

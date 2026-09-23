@@ -97,6 +97,7 @@ runs:
       run: |
         TRIAGE="$RUNNER_TEMP/triage.jsonl"
         : > "$TRIAGE"
+        T0=$(date +%s%3N)
 
         while read -r file; do
           [ -z "$file" ] && continue
@@ -139,6 +140,10 @@ runs:
 
         jq -s '.' "$TRIAGE" > "$RUNNER_TEMP/triage.json"
         cat "$RUNNER_TEMP/triage.json"
+
+        jq -n --argjson ms "$(( $(date +%s%3N) - T0 ))" \
+              --argjson errors "$(jq -s 'map(select(.error)) | length' "$TRIAGE")" \
+          '{duration_ms: $ms, errors: $errors}' > "$RUNNER_TEMP/triage-meta.json"
 
     - name: Build prompt
       if: steps.filter.outputs.has_files == 'true'
@@ -290,25 +295,75 @@ runs:
         PR_NUMBER: ${{ github.event.pull_request.number }}
         MODEL: ${{ inputs.model }}
         HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        THRESHOLD: ${{ inputs.severity-threshold }}
+        SHOULD_BLOCK: ${{ steps.review.outputs.should_block }}
+        FILES: ${{ steps.filter.outputs.files }}
       run: |
         [ -f "$RUNNER_TEMP/triage.json" ] || echo '[]' > "$RUNNER_TEMP/triage.json"
+        [ -f "$RUNNER_TEMP/triage-meta.json" ] || echo '{}' > "$RUNNER_TEMP/triage-meta.json"
+
+        FILES_CHANGED=$(awk 'NF{n++} END{print n+0}' "$FILES")
+        DIFF_LINES=$(awk 'END{print NR+0}' "$RUNNER_TEMP/diff.patch")
 
         jq --arg pr "$PR_NUMBER" \
            --arg repo "$GITHUB_REPOSITORY" \
            --arg sha "$HEAD_SHA" \
            --arg model "$MODEL" \
+           --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+           --arg run_id "$GITHUB_RUN_ID" \
+           --arg run_url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+           --arg threshold "$THRESHOLD" \
+           --arg block "$SHOULD_BLOCK" \
+           --argjson attempt "$GITHUB_RUN_ATTEMPT" \
+           --argjson files_changed "$FILES_CHANGED" \
+           --argjson diff_lines "$DIFF_LINES" \
            --slurpfile verdict "$RUNNER_TEMP/verdict.json" \
            --slurpfile triage "$RUNNER_TEMP/triage.json" \
+           --slurpfile tmeta "$RUNNER_TEMP/triage-meta.json" \
           '{
             repo: $repo,
             pr: ($pr | tonumber),
             head_sha: $sha,
             model: $model,
+            timestamp: $ts,
+            run_id: $run_id,
+            run_attempt: $attempt,
+            run_url: $run_url,
             claude_cost_usd: .total_cost_usd,
             num_turns: .num_turns,
             duration_ms: .duration_ms,
+            usage: {
+              input_tokens: .usage.input_tokens,
+              output_tokens: .usage.output_tokens,
+              cache_creation_input_tokens: .usage.cache_creation_input_tokens,
+              cache_read_input_tokens: .usage.cache_read_input_tokens
+            },
+            pr_size: {
+              files_changed: $files_changed,
+              diff_lines: $diff_lines
+            },
+            verdict: {
+              should_block: ($block == "true"),
+              threshold: $threshold,
+              max_severity: (
+                [$verdict[0].findings[].severity]
+                | map(if . == "critical" then 4
+                      elif . == "high" then 3
+                      elif . == "medium" then 2
+                      elif . == "low" then 1
+                      else 0 end)
+                | (max // 0)
+                | if . == 4 then "critical"
+                  elif . == 3 then "high"
+                  elif . == 2 then "medium"
+                  elif . == 1 then "low"
+                  else "none" end
+              )
+            },
             findings: $verdict[0].findings,
-            triage: $triage[0]
+            triage: $triage[0],
+            triage_duration_ms: $tmeta[0].duration_ms,
+            triage_errors: $tmeta[0].errors
           }' "$RUNNER_TEMP/raw.json" > "$RUNNER_TEMP/metrics.json"
 
         {

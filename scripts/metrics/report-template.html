@@ -1,0 +1,1029 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Métricas do revisor de PRs</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page:        #f9f9f7;
+    --surface:     #fcfcfb;
+    --ink:         #0b0b0b;
+    --ink-2:       #52514e;
+    --muted:       #898781;
+    --grid:        #e1e0d9;
+    --axis:        #c3c2b7;
+    --border:      rgba(11,11,11,0.10);
+    --accent:      #2a78d6;
+    --accent-soft: #cde2fb;
+    --good:        #0ca30c;
+    --warning:     #fab219;
+    --serious:     #ec835a;
+    --critical:    #d03b3b;
+    --sev-low:      var(--good);
+    --sev-medium:   var(--warning);
+    --sev-high:     var(--serious);
+    --sev-critical: var(--critical);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --page:        #0d0d0d;
+      --surface:     #1a1a19;
+      --ink:         #ffffff;
+      --ink-2:       #c3c2b7;
+      --muted:       #898781;
+      --grid:        #2c2c2a;
+      --axis:        #383835;
+      --border:      rgba(255,255,255,0.10);
+      --accent:      #3987e5;
+      --accent-soft: #184f95;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page:        #0d0d0d;
+    --surface:     #1a1a19;
+    --ink:         #ffffff;
+    --ink-2:       #c3c2b7;
+    --muted:       #898781;
+    --grid:        #2c2c2a;
+    --axis:        #383835;
+    --border:      rgba(255,255,255,0.10);
+    --accent:      #3987e5;
+    --accent-soft: #184f95;
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    padding: 0 16px 72px;
+    background: var(--page);
+    color: var(--ink);
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 1120px; margin: 0 auto; }
+
+  header.top {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 16px; flex-wrap: wrap; padding: 32px 0 8px;
+  }
+  header.top h1 { font-size: 20px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+  header.top .sub { color: var(--muted); font-size: 13px; }
+
+  button.ghost {
+    font: inherit; color: var(--ink-2); background: var(--surface);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 6px 12px; cursor: pointer;
+  }
+  button.ghost:hover { color: var(--ink); }
+
+  .filters {
+    display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end;
+    padding: 16px; margin: 16px 0 24px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  }
+  .filters label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+  .filters select {
+    font: inherit; color: var(--ink); background: var(--page);
+    border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; min-width: 170px;
+  }
+  .filters .count { margin-left: auto; font-size: 12px; color: var(--muted); align-self: center; }
+
+  section { margin: 0 0 28px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px;
+  }
+  .card h2 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+  .card .note { font-size: 12.5px; color: var(--muted); margin: 0 0 20px; max-width: 68ch; }
+  .card h3 { font-size: 12px; font-weight: 600; color: var(--ink-2); margin: 0 0 12px;
+             text-transform: uppercase; letter-spacing: 0.06em; }
+
+  /* Hero + KPIs */
+  .hero { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-end; margin-bottom: 24px; }
+  .hero .figure { font-size: 52px; line-height: 1; font-weight: 600; letter-spacing: -0.02em; }
+  .hero .caption { font-size: 13px; color: var(--muted); margin-top: 6px; }
+  /* Separadores via box-shadow em vez de gap colorido: assim as células vazias
+     que sobram no fim do grid não aparecem pintadas com a cor da borda. */
+  .kpis { display: grid; background: var(--surface);
+          border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+          grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); }
+  .kpi { padding: 16px 18px; box-shadow: inset -1px -1px 0 var(--border); }
+  .kpi .v { font-size: 24px; font-weight: 600; letter-spacing: -0.01em; }
+  .kpi .k { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+  /* Barras horizontais (HTML: texto nítido em qualquer largura) */
+  .bars { display: flex; flex-direction: column; gap: 10px; }
+  .bar-row { display: grid; grid-template-columns: minmax(96px, 168px) 1fr auto; gap: 12px; align-items: center; }
+  .bar-row .lbl { font-size: 12.5px; color: var(--ink-2); overflow-wrap: anywhere; }
+  .bar-track { background: var(--grid); border-radius: 4px; height: 14px; position: relative; }
+  .bar-fill { background: var(--accent); border-radius: 0 4px 4px 0; height: 100%;
+              min-width: 2px; transition: width .18s ease; }
+  .bar-row .val { font-size: 12.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+  .panels { display: grid; gap: 28px; grid-template-columns: repeat(auto-fit, minmax(272px, 1fr)); }
+
+  /* Barra empilhada de severidade */
+  .stack { display: flex; height: 26px; border-radius: 4px; overflow: hidden; gap: 2px; }
+  .stack span { display: flex; align-items: center; justify-content: center;
+                font-size: 11.5px; font-weight: 600; color: #0b0b0b;
+                font-variant-numeric: tabular-nums; min-width: 3px; }
+  .stack-row { margin-bottom: 14px; }
+  .stack-row .lbl { font-size: 12.5px; color: var(--ink-2); margin-bottom: 5px;
+                    display: flex; justify-content: space-between; }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 16px; }
+  .legend .item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-2); }
+  .glyph { width: 11px; height: 11px; flex: none; }
+
+  /* Slider */
+  .slider-bar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
+  .slider-bar input[type=range] { flex: 1 1 240px; accent-color: var(--accent); min-width: 180px; }
+  .slider-bar .read { font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .slider-bar .read b { color: var(--ink); font-size: 16px; }
+
+  .callout { border: 1px solid var(--border); border-left: 3px solid var(--accent);
+             border-radius: 0 8px 8px 0; padding: 12px 14px; margin-top: 16px;
+             font-size: 12.5px; color: var(--ink-2); }
+  .callout.danger { border-left-color: var(--critical); }
+  .callout b { color: var(--ink); }
+
+  /* Tabela */
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th { text-align: left; font-weight: 600; color: var(--muted); font-size: 11.5px;
+       text-transform: uppercase; letter-spacing: 0.05em;
+       padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  th[data-sort] { cursor: pointer; user-select: none; }
+  th[data-sort]:hover { color: var(--ink); }
+  td { padding: 9px 10px; border-bottom: 1px solid var(--border); color: var(--ink-2); vertical-align: top; }
+  tr.run { cursor: pointer; }
+  tr.run:hover td { color: var(--ink); }
+  tr.detail td { padding: 0 10px 14px; }
+  .finding { display: grid; grid-template-columns: auto auto 1fr; gap: 10px;
+             padding: 7px 0; border-bottom: 1px solid var(--border); align-items: baseline; }
+  .finding:last-child { border-bottom: 0; }
+  .finding .loc { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; color: var(--ink-2); }
+  .sev-tag { display: inline-flex; align-items: center; gap: 5px; font-size: 11px;
+             font-weight: 600; white-space: nowrap; color: var(--ink-2); }
+  .table-scroll { overflow-x: auto; }
+
+  .empty { color: var(--muted); font-size: 13px; padding: 28px 0; text-align: center;
+           border: 1px dashed var(--border); border-radius: 8px; }
+
+  /* Tooltip compartilhado */
+  #tip { position: fixed; pointer-events: none; opacity: 0; transition: opacity .12s;
+         background: var(--surface); color: var(--ink); border: 1px solid var(--border);
+         border-radius: 8px; padding: 8px 10px; font-size: 12px; z-index: 50;
+         box-shadow: 0 6px 20px rgba(0,0,0,.14); max-width: 280px; }
+  #tip .t-k { color: var(--muted); }
+  #tip b { font-variant-numeric: tabular-nums; }
+
+  svg { display: block; overflow: visible; }
+  svg text { fill: var(--muted); font-size: 11px; }
+  svg text.strong { fill: var(--ink-2); }
+
+  @media (max-width: 560px) {
+    .bar-row { grid-template-columns: 1fr auto; }
+    .bar-row .lbl { grid-column: 1 / -1; }
+    .hero .figure { font-size: 40px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <div>
+    <h1>Métricas do revisor de PRs</h1>
+    <div class="sub" id="subtitle"></div>
+  </div>
+  <button class="ghost" id="theme-toggle" type="button">Alternar tema</button>
+</header>
+
+<div class="filters">
+  <label>Modelo<select id="f-model"></select></label>
+  <label>Repositório<select id="f-repo"></select></label>
+  <label>Período<select id="f-range"></select></label>
+  <span class="count" id="f-count"></span>
+</div>
+
+<section><div class="card">
+  <div class="hero">
+    <div>
+      <div class="figure" id="hero-value">—</div>
+      <div class="caption">Custo acumulado em revisões</div>
+    </div>
+  </div>
+  <div class="kpis" id="kpis"></div>
+</div></section>
+
+<section><div class="card">
+  <h2>Comparação de modelos</h2>
+  <p class="note">Cada painel tem seu próprio eixo e ordena do maior para o menor.
+     O custo por 1k linhas normaliza pelo tamanho do diff — sem ele, o custo médio
+     só reflete quais PRs calharam de ser grandes.</p>
+  <div class="panels" id="model-panels"></div>
+</div></section>
+
+<section><div class="card">
+  <h2>Distribuição de severidade</h2>
+  <p class="note">A severidade máxima de cada execução é o que decide se o job reprova,
+     então a mistura importa mais que o total.</p>
+  <div id="severity"></div>
+</div></section>
+
+<section><div class="card">
+  <h2>A triagem do Jev se paga?</h2>
+  <p class="note">Simula pular a revisão do Claude quando todos os arquivos do PR ficam
+     abaixo do limiar de risco. Economia líquida já desconta o custo de chamar o Jev
+     em <em>todos</em> os PRs — você paga a triagem mesmo quando ela não deixa pular nada.</p>
+  <div class="slider-bar">
+    <span class="read">Limiar de risco <b id="thr-read">1.5</b></span>
+    <input type="range" id="thr" min="0" max="4" step="0.1" value="1.5" aria-label="Limiar de risco">
+  </div>
+  <div id="shadow"></div>
+</div></section>
+
+<section><div class="card">
+  <h2>O Jev está discriminando risco?</h2>
+  <p class="note">Distribuição dos scores atribuídos por arquivo. Se as barras se
+     concentram num ponto só, a triagem não separa arquivo perigoso de arquivo trivial
+     e nenhum limiar vai ajudar.</p>
+  <div id="risk-dist"></div>
+</div></section>
+
+<section><div class="card">
+  <h2>Arquivos com mais achados</h2>
+  <p class="note">Contagem ponderada por severidade (crítico = 4 … baixo = 1).</p>
+  <div id="hotspots"></div>
+</div></section>
+
+<section><div class="card">
+  <h2>Reprodutibilidade</h2>
+  <p class="note">O mesmo achado, visto por execuções diferentes, recebe a mesma
+     severidade? Divergência aqui move a severidade máxima e portanto troca o veredito
+     do job entre aprovar e reprovar.</p>
+  <div id="repro"></div>
+</div></section>
+
+<section><div class="card">
+  <h2>Execuções</h2>
+  <p class="note">Clique numa linha para ver os achados.</p>
+  <div class="table-scroll" id="runs"></div>
+</div></section>
+
+</div>
+<div id="tip" role="status" aria-live="polite"></div>
+
+<script type="application/json" id="metrics-data">
+__METRICS_DATA__
+</script>
+
+<script>
+(() => {
+  "use strict";
+
+  // Dados vêm de um LLM que analisou um diff de terceiros: tratados só como texto.
+  // Nada aqui usa innerHTML com conteúdo dos dados.
+  let RUNS;
+  try {
+    RUNS = JSON.parse(document.getElementById("metrics-data").textContent);
+  } catch (e) {
+    RUNS = [];
+  }
+  if (!Array.isArray(RUNS)) RUNS = [];
+
+  const JEV_PRICE_PER_TOKEN = 0.000000042;
+  const SEVERITIES = ["critical", "high", "medium", "low"];
+  const SEV_RANK = { critical: 4, high: 3, medium: 2, low: 1 };
+  const SEV_LABEL = { critical: "Crítico", high: "Alto", medium: "Médio", low: "Baixo" };
+  // Forma além da cor: as cores de status warning/serious não passam o piso de
+  // separação sozinhas, então severidade sempre vem com glifo + rótulo.
+  const SEV_SHAPE = { critical: "square", high: "diamond", medium: "triangle", low: "circle" };
+
+  const $ = (id) => document.getElementById(id);
+  const el = (tag, cls, text) => {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = String(text);
+    return n;
+  };
+  const clear = (n) => { while (n.firstChild) n.removeChild(n.firstChild); };
+  const svgEl = (tag, attrs) => {
+    const n = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    for (const k in attrs) n.setAttribute(k, attrs[k]);
+    return n;
+  };
+
+  const usd = (v) => v == null ? "—" : "$" + (v >= 1 ? v.toFixed(2) : v.toFixed(4));
+  const secs = (ms) => ms == null ? "—" : (ms / 1000).toFixed(1) + "s";
+  const pct = (v) => (v * 100).toFixed(0) + "%";
+  const num = (v) => v == null ? "—" : v.toLocaleString("pt-BR");
+
+  const findingsOf = (r) => Array.isArray(r.findings) ? r.findings : [];
+  const triageOf = (r) => Array.isArray(r.triage) ? r.triage : [];
+  const diffLines = (r) => r.pr_size && r.pr_size.diff_lines != null ? r.pr_size.diff_lines : null;
+  const runDate = (r) => r.timestamp ? new Date(r.timestamp) : null;
+
+  const median = (xs) => {
+    const s = xs.filter((x) => x != null).slice().sort((a, b) => a - b);
+    if (!s.length) return null;
+    const m = Math.floor(s.length / 2);
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+  };
+  const sum = (xs) => xs.reduce((a, b) => a + (b || 0), 0);
+
+  // ---------------------------------------------------------------- tooltip
+  const tip = $("tip");
+  let tipRow = null;
+  function showTip(evt, rows) {
+    clear(tip);
+    rows.forEach(([k, v]) => {
+      const line = el("div");
+      if (v === undefined) {
+        line.appendChild(el("b", null, k));
+      } else {
+        line.appendChild(el("span", "t-k", k + " "));
+        line.appendChild(el("b", null, v));
+      }
+      tip.appendChild(line);
+    });
+    tip.style.opacity = "1";
+    moveTip(evt);
+  }
+  function moveTip(evt) {
+    const pad = 14, w = tip.offsetWidth, h = tip.offsetHeight;
+    let x = evt.clientX + pad, y = evt.clientY + pad;
+    if (x + w > innerWidth - 8) x = evt.clientX - w - pad;
+    if (y + h > innerHeight - 8) y = evt.clientY - h - pad;
+    tip.style.left = Math.max(8, x) + "px";
+    tip.style.top = Math.max(8, y) + "px";
+  }
+  const hideTip = () => { tip.style.opacity = "0"; tipRow = null; };
+  function bindTip(node, rowsFn) {
+    node.addEventListener("mouseenter", (e) => showTip(e, rowsFn()));
+    node.addEventListener("mousemove", moveTip);
+    node.addEventListener("mouseleave", hideTip);
+  }
+
+  // ------------------------------------------------------------ componentes
+  function barRows(host, items, fmt) {
+    clear(host);
+    if (!items.length) { host.appendChild(emptyBox("Sem dados.")); return; }
+    const max = Math.max(...items.map((d) => d.value), 0) || 1;
+    const box = el("div", "bars");
+    items.forEach((d) => {
+      const row = el("div", "bar-row");
+      row.appendChild(el("div", "lbl", d.label));
+      const track = el("div", "bar-track");
+      const fill = el("div", "bar-fill");
+      fill.style.width = Math.max(0.6, (d.value / max) * 100) + "%";
+      track.appendChild(fill);
+      row.appendChild(track);
+      row.appendChild(el("div", "val", fmt(d.value)));
+      bindTip(row, () => [[d.label, undefined], ...(d.tip || []), ["valor", fmt(d.value)]]);
+      box.appendChild(row);
+    });
+    host.appendChild(box);
+  }
+
+  function emptyBox(msg) { return el("div", "empty", msg); }
+
+  function sevGlyph(sev, size) {
+    const s = size || 11, c = "var(--sev-" + sev + ")";
+    const svg = svgEl("svg", { class: "glyph", width: s, height: s, viewBox: "0 0 12 12", "aria-hidden": "true" });
+    const shape = SEV_SHAPE[sev];
+    if (shape === "square") svg.appendChild(svgEl("rect", { x: 1, y: 1, width: 10, height: 10, rx: 2, fill: c }));
+    else if (shape === "diamond") svg.appendChild(svgEl("path", { d: "M6 0.5 11.5 6 6 11.5 0.5 6Z", fill: c }));
+    else if (shape === "triangle") svg.appendChild(svgEl("path", { d: "M6 1 11.5 11 0.5 11Z", fill: c }));
+    else svg.appendChild(svgEl("circle", { cx: 6, cy: 6, r: 5, fill: c }));
+    return svg;
+  }
+
+  function sevTag(sev) {
+    const t = el("span", "sev-tag");
+    t.appendChild(sevGlyph(sev));
+    t.appendChild(el("span", null, SEV_LABEL[sev] || sev));
+    return t;
+  }
+
+  // Charts em SVG redesenhados no tamanho real do container: o texto fica
+  // sempre em pixels de verdade em vez de encolher junto com um viewBox fixo.
+  const responsive = [];
+  function registerChart(host, draw) {
+    responsive.push({ host, draw });
+    draw(host, host.clientWidth || 640);
+  }
+  let rt;
+  addEventListener("resize", () => {
+    clearTimeout(rt);
+    rt = setTimeout(() => responsive.forEach((c) => c.draw(c.host, c.host.clientWidth || 640)), 120);
+  });
+
+  function linePanel(host, width, opts) {
+    clear(host);
+    const H = opts.height || 180;
+    const m = { t: 12, r: 14, b: 28, l: 54 };
+    const W = Math.max(280, width);
+    const iw = W - m.l - m.r, ih = H - m.t - m.b;
+    const pts = opts.points;
+    const ys = pts.map((p) => p.y);
+    let y0 = Math.min(0, Math.min(...ys)), y1 = Math.max(...ys);
+    if (y1 === y0) y1 = y0 + 1;
+    // Série de contagem: passo inteiro, senão os ticks arredondam para rótulos repetidos.
+    let ticks = 4, step;
+    if (opts.integer) {
+      y0 = Math.floor(y0); y1 = Math.ceil(y1);
+      step = Math.max(1, Math.ceil((y1 - y0) / 4));
+      ticks = Math.ceil((y1 - y0) / step);
+      y1 = y0 + step * ticks;
+    } else {
+      const pad = (y1 - y0) * 0.08;
+      y1 += pad; if (y0 < 0) y0 -= pad;
+      step = (y1 - y0) / ticks;
+    }
+    const x0 = pts[0].x, x1 = pts[pts.length - 1].x;
+    const sx = (v) => m.l + ((v - x0) / (x1 - x0 || 1)) * iw;
+    const sy = (v) => m.t + ih - ((v - y0) / (y1 - y0)) * ih;
+
+    const svg = svgEl("svg", { width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: "img" });
+    svg.appendChild(svgEl("title", {})).textContent = opts.title;
+
+    // grid + eixo y
+    for (let i = 0; i <= ticks; i++) {
+      const v = y0 + step * i, y = sy(v);
+      svg.appendChild(svgEl("line", { x1: m.l, x2: m.l + iw, y1: y, y2: y, stroke: "var(--grid)", "stroke-width": 1 }));
+      const t = svgEl("text", { x: m.l - 8, y: y + 3.5, "text-anchor": "end" });
+      t.textContent = opts.fmtY(v);
+      svg.appendChild(t);
+    }
+    // zero mais firme quando o eixo cruza zero
+    if (y0 < 0 && y1 > 0) {
+      svg.appendChild(svgEl("line", { x1: m.l, x2: m.l + iw, y1: sy(0), y2: sy(0), stroke: "var(--axis)", "stroke-width": 1 }));
+    }
+    // eixo x
+    for (let i = 0; i <= 4; i++) {
+      const v = x0 + ((x1 - x0) * i) / 4;
+      const t = svgEl("text", { x: sx(v), y: H - 8, "text-anchor": i === 0 ? "start" : i === 4 ? "end" : "middle" });
+      t.textContent = v.toFixed(1);
+      svg.appendChild(t);
+    }
+
+    const color = opts.color || "var(--accent)";
+    if (opts.area) {
+      let d = `M${sx(pts[0].x)},${sy(Math.max(y0, 0))}`;
+      pts.forEach((p) => { d += `L${sx(p.x)},${sy(p.y)}`; });
+      d += `L${sx(pts[pts.length - 1].x)},${sy(Math.max(y0, 0))}Z`;
+      svg.appendChild(svgEl("path", { d, fill: color, opacity: 0.12 }));
+    }
+    let d = "";
+    pts.forEach((p, i) => { d += (i ? "L" : "M") + sx(p.x) + "," + sy(p.y); });
+    svg.appendChild(svgEl("path", { d, fill: "none", stroke: color, "stroke-width": 2, "stroke-linejoin": "round" }));
+
+    // marcador do limiar atual
+    const cross = svgEl("line", { x1: 0, x2: 0, y1: m.t, y2: m.t + ih, stroke: "var(--axis)", "stroke-width": 1, "stroke-dasharray": "3 3", opacity: 0 });
+    svg.appendChild(cross);
+    const dot = svgEl("circle", { r: 4.5, fill: color, stroke: "var(--surface)", "stroke-width": 2, opacity: 0 });
+    svg.appendChild(dot);
+    if (opts.marker != null) {
+      const p = pts.reduce((a, b) => Math.abs(b.x - opts.marker) < Math.abs(a.x - opts.marker) ? b : a);
+      cross.setAttribute("x1", sx(p.x)); cross.setAttribute("x2", sx(p.x)); cross.setAttribute("opacity", 1);
+      dot.setAttribute("cx", sx(p.x)); dot.setAttribute("cy", sy(p.y)); dot.setAttribute("opacity", 1);
+    }
+
+    // crosshair + tooltip
+    const hit = svgEl("rect", { x: m.l, y: m.t, width: iw, height: ih, fill: "transparent" });
+    svg.appendChild(hit);
+    hit.addEventListener("mousemove", (e) => {
+      const r = svg.getBoundingClientRect();
+      const xv = x0 + ((e.clientX - r.left - m.l) / (iw || 1)) * (x1 - x0);
+      const p = pts.reduce((a, b) => Math.abs(b.x - xv) < Math.abs(a.x - xv) ? b : a);
+      showTip(e, [["limiar " + p.x.toFixed(1), undefined], [opts.title, opts.fmtY(p.y)]]);
+    });
+    hit.addEventListener("mouseleave", hideTip);
+
+    host.appendChild(svg);
+  }
+
+  function histogram(host, width, bins, fmt) {
+    clear(host);
+    const H = 190, m = { t: 12, r: 14, b: 34, l: 40 };
+    const W = Math.max(280, width);
+    const iw = W - m.l - m.r, ih = H - m.t - m.b;
+    const max = Math.max(...bins.map((b) => b.count), 1);
+    // Contagens são inteiras: passo inteiro evita rótulos repetidos no eixo.
+    const step = Math.max(1, Math.ceil(max / 3));
+    const ticks = Math.ceil(max / step);
+    const top = step * ticks;
+    const svg = svgEl("svg", { width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: "img" });
+    for (let i = 0; i <= ticks; i++) {
+      const y = m.t + ih - (ih * i) / ticks;
+      svg.appendChild(svgEl("line", { x1: m.l, x2: m.l + iw, y1: y, y2: y, stroke: "var(--grid)" }));
+      const t = svgEl("text", { x: m.l - 8, y: y + 3.5, "text-anchor": "end" });
+      t.textContent = step * i;
+      svg.appendChild(t);
+    }
+    const bw = iw / bins.length;
+    bins.forEach((b, i) => {
+      const h = (b.count / top) * ih;
+      const x = m.l + i * bw;
+      if (b.count > 0) {
+        const r = svgEl("rect", {
+          x: x + 1, y: m.t + ih - h, width: Math.max(1, bw - 2), height: h,
+          rx: 4, fill: "var(--accent)"
+        });
+        svg.appendChild(r);
+        r.addEventListener("mouseenter", (e) => showTip(e, [["risco " + fmt(b.lo) + "–" + fmt(b.hi), undefined], ["arquivos", String(b.count)]]));
+        r.addEventListener("mousemove", moveTip);
+        r.addEventListener("mouseleave", hideTip);
+      }
+      if (i % Math.ceil(bins.length / 8) === 0) {
+        const t = svgEl("text", { x: x, y: H - 12, "text-anchor": "middle" });
+        t.textContent = fmt(b.lo);
+        svg.appendChild(t);
+      }
+    });
+    svg.appendChild(svgEl("line", { x1: m.l, x2: m.l + iw, y1: m.t + ih, y2: m.t + ih, stroke: "var(--axis)" }));
+    const lbl = svgEl("text", { x: m.l + iw / 2, y: H - 0.5, "text-anchor": "middle", class: "strong" });
+    lbl.textContent = "score de risco do Jev";
+    svg.appendChild(lbl);
+    host.appendChild(svg);
+  }
+
+  // ------------------------------------------------------------- simulação
+  // Porte fiel de scripts/metrics/shadow.sh: o custo do Jev incide em toda
+  // execução com triagem, pulando ou não.
+  function simulate(runs, threshold) {
+    let skipped = 0, saved = 0, jevCost = 0;
+    const lost = [];
+    runs.forEach((r) => {
+      const tr = triageOf(r), fs = findingsOf(r);
+      const skip = tr.length > 0 && tr.every((t) => t.risk != null && t.risk < threshold);
+      if (skip) {
+        skipped++;
+        saved += r.claude_cost_usd || 0;
+        fs.forEach((f) => {
+          if (f.severity === "high" || f.severity === "critical") lost.push({ run: r, f });
+        });
+      }
+      jevCost += sum(tr.map((t) => t.input_tokens || 0)) * JEV_PRICE_PER_TOKEN;
+    });
+    return { threshold, skipped, net: saved - jevCost, saved, jevCost, lost };
+  }
+
+  const THRESHOLDS = Array.from({ length: 41 }, (_, i) => Math.round(i * 10) / 100);
+
+  // --------------------------------------------------------------- estado
+  const state = { model: "all", repo: "all", range: "all", threshold: 1.5, sort: "date", dir: -1 };
+
+  function visible() {
+    const now = Date.now();
+    const days = { "7": 7, "30": 30, "90": 90 }[state.range];
+    return RUNS.filter((r) => {
+      if (state.model !== "all" && r.model !== state.model) return false;
+      if (state.repo !== "all" && r.repo !== state.repo) return false;
+      if (days) {
+        const d = runDate(r);
+        if (!d || now - d.getTime() > days * 864e5) return false;
+      }
+      return true;
+    });
+  }
+
+  // -------------------------------------------------------------- seções
+  function renderKpis(runs) {
+    const costs = runs.map((r) => r.claude_cost_usd).filter((v) => v != null);
+    const total = sum(costs);
+    $("hero-value").textContent = runs.length ? usd(total) : "—";
+
+    const allFindings = runs.flatMap(findingsOf);
+    const grave = allFindings.filter((f) => SEV_RANK[f.severity] >= 3).length;
+    const withVerdict = runs.filter((r) => r.verdict && r.verdict.should_block != null);
+    const blocked = withVerdict.filter((r) => r.verdict.should_block === true || r.verdict.should_block === "true").length;
+    const lineRuns = runs.filter((r) => diffLines(r));
+    const per1k = lineRuns.length
+      ? sum(lineRuns.map((r) => r.claude_cost_usd || 0)) / (sum(lineRuns.map(diffLines)) / 1000)
+      : null;
+
+    const items = [
+      [String(runs.length), "Execuções"],
+      [runs.length ? usd(total / runs.length) : "—", "Custo médio por PR"],
+      [per1k != null ? usd(per1k) : "—", "Custo por 1k linhas de diff"],
+      [secs(median(runs.map((r) => r.duration_ms))), "Duração mediana"],
+      [String(allFindings.length), "Achados"],
+      [String(grave), "Achados altos + críticos"],
+      [withVerdict.length ? pct(blocked / withVerdict.length) : "—", "Execuções que reprovaram"],
+    ];
+    const host = $("kpis");
+    clear(host);
+    items.forEach(([v, k]) => {
+      const box = el("div", "kpi");
+      box.appendChild(el("div", "v", v));
+      box.appendChild(el("div", "k", k));
+      host.appendChild(box);
+    });
+  }
+
+  function byModel(runs) {
+    const map = new Map();
+    runs.forEach((r) => {
+      const k = r.model || "desconhecido";
+      if (!map.has(k)) map.set(k, []);
+      map.get(k).push(r);
+    });
+    return map;
+  }
+
+  function renderModels(runs) {
+    const host = $("model-panels");
+    clear(host);
+    const groups = byModel(runs);
+    if (!groups.size) { host.appendChild(emptyBox("Sem execuções no filtro atual.")); return; }
+
+    const mk = (title, valueFn, fmt) => {
+      const panel = el("div");
+      panel.appendChild(el("h3", null, title));
+      const body = el("div");
+      const items = [];
+      groups.forEach((rs, model) => {
+        const v = valueFn(rs);
+        if (v != null) items.push({ label: model, value: v, tip: [["execuções", String(rs.length)]] });
+      });
+      items.sort((a, b) => b.value - a.value);
+      barRows(body, items, fmt);
+      panel.appendChild(body);
+      host.appendChild(panel);
+    };
+
+    mk("Custo médio por PR", (rs) => sum(rs.map((r) => r.claude_cost_usd || 0)) / rs.length, usd);
+    mk("Custo por 1k linhas", (rs) => {
+      const w = rs.filter(diffLines);
+      if (!w.length) return null;
+      return sum(w.map((r) => r.claude_cost_usd || 0)) / (sum(w.map(diffLines)) / 1000);
+    }, usd);
+    mk("Duração mediana", (rs) => median(rs.map((r) => r.duration_ms)), secs);
+    mk("Achados por execução", (rs) => sum(rs.map((r) => findingsOf(r).length)) / rs.length, (v) => v.toFixed(1));
+  }
+
+  function renderSeverity(runs) {
+    const host = $("severity");
+    clear(host);
+    const groups = byModel(runs);
+    const anyFinding = runs.some((r) => findingsOf(r).length);
+    if (!anyFinding) { host.appendChild(emptyBox("Nenhum achado registrado no filtro atual.")); return; }
+
+    groups.forEach((rs, model) => {
+      const counts = {};
+      SEVERITIES.forEach((s) => { counts[s] = 0; });
+      rs.flatMap(findingsOf).forEach((f) => { if (counts[f.severity] != null) counts[f.severity]++; });
+      const total = sum(SEVERITIES.map((s) => counts[s]));
+      if (!total) return;
+
+      const row = el("div", "stack-row");
+      const lbl = el("div", "lbl");
+      lbl.appendChild(el("span", null, model));
+      lbl.appendChild(el("span", null, total + " achado" + (total === 1 ? "" : "s")));
+      row.appendChild(lbl);
+
+      const stack = el("div", "stack");
+      SEVERITIES.forEach((s) => {
+        if (!counts[s]) return;
+        const seg = el("span", null, counts[s]);
+        seg.style.background = "var(--sev-" + s + ")";
+        seg.style.flex = counts[s];
+        bindTip(seg, () => [[SEV_LABEL[s], undefined], ["achados", String(counts[s])],
+                            ["share", pct(counts[s] / total)]]);
+        stack.appendChild(seg);
+      });
+      row.appendChild(stack);
+      host.appendChild(row);
+    });
+
+    const legend = el("div", "legend");
+    SEVERITIES.forEach((s) => {
+      const item = el("div", "item");
+      item.appendChild(sevGlyph(s));
+      item.appendChild(el("span", null, SEV_LABEL[s]));
+      legend.appendChild(item);
+    });
+    host.appendChild(legend);
+  }
+
+  function renderShadow(runs) {
+    const host = $("shadow");
+    clear(host);
+    const withTriage = runs.filter((r) => triageOf(r).length);
+    if (!withTriage.length) {
+      host.appendChild(emptyBox("Nenhuma execução tem dados de triagem. Rode a action com `typesafe-api-key` para habilitar esta análise."));
+      return;
+    }
+
+    const curve = THRESHOLDS.map((t) => simulate(runs, t));
+    const here = simulate(runs, state.threshold);
+
+    const panels = el("div", "panels");
+    const p1 = el("div");
+    p1.appendChild(el("h3", null, "Economia líquida"));
+    const c1 = el("div");
+    p1.appendChild(c1);
+    const p2 = el("div");
+    p2.appendChild(el("h3", null, "Achados graves perdidos"));
+    const c2 = el("div");
+    p2.appendChild(c2);
+    panels.appendChild(p1);
+    panels.appendChild(p2);
+    host.appendChild(panels);
+
+    // Dois painéis com o mesmo eixo x — nunca dois eixos y num gráfico só.
+    registerChart(c1, (h, w) => linePanel(h, w, {
+      title: "economia líquida", points: curve.map((s) => ({ x: s.threshold, y: s.net })),
+      fmtY: usd, area: true, marker: state.threshold,
+    }));
+    registerChart(c2, (h, w) => linePanel(h, w, {
+      title: "achados graves perdidos", points: curve.map((s) => ({ x: s.threshold, y: s.lost.length })),
+      fmtY: (v) => String(Math.round(v)), color: "var(--critical)", marker: state.threshold, integer: true,
+    }));
+
+    const safe = curve.filter((s) => s.lost.length === 0).reduce((a, s) => s.threshold > a.threshold ? s : a, curve[0]);
+    const zone = el("div", "callout");
+    zone.appendChild(el("b", null, "Zona segura: limiar até " + safe.threshold.toFixed(1) + ". "));
+    zone.appendChild(el("span", null,
+      "É o maior limiar que não perde nenhum achado alto ou crítico. Nele, " +
+      safe.skipped + " de " + runs.length + " execuções seriam puladas, com economia líquida de " + usd(safe.net) + "."));
+    host.appendChild(zone);
+
+    const now = el("div", "callout" + (here.lost.length ? " danger" : ""));
+    now.appendChild(el("b", null, "No limiar " + state.threshold.toFixed(1) + ": "));
+    now.appendChild(el("span", null,
+      here.skipped + " execuç" + (here.skipped === 1 ? "ão pulada" : "ões puladas") +
+      " · economia bruta " + usd(here.saved) + " − custo Jev " + usd(here.jevCost) +
+      " = líquido " + usd(here.net) +
+      " · " + here.lost.length + " achado(s) grave(s) perdido(s)."));
+    if (here.lost.length) {
+      here.lost.forEach(({ run, f }) => {
+        const line = el("div", "finding");
+        line.appendChild(sevTag(f.severity));
+        line.appendChild(el("span", "loc", "PR #" + run.pr + " " + f.file + ":" + f.line));
+        line.appendChild(el("span", null, f.message));
+        now.appendChild(line);
+      });
+    }
+    host.appendChild(now);
+  }
+
+  function renderRiskDist(runs) {
+    const host = $("risk-dist");
+    clear(host);
+    const risks = runs.flatMap(triageOf).map((t) => t.risk).filter((v) => v != null);
+    if (!risks.length) {
+      host.appendChild(emptyBox("Nenhuma execução tem dados de triagem. Rode a action com `typesafe-api-key` para habilitar esta análise."));
+      return;
+    }
+    const bins = Array.from({ length: 20 }, (_, i) => ({ lo: i * 0.2, hi: (i + 1) * 0.2, count: 0 }));
+    risks.forEach((r) => {
+      const i = Math.min(bins.length - 1, Math.max(0, Math.floor(r / 0.2)));
+      bins[i].count++;
+    });
+    const chart = el("div");
+    host.appendChild(chart);
+    registerChart(chart, (h, w) => histogram(h, w, bins, (v) => v.toFixed(1)));
+
+    const spread = Math.max(...risks) - Math.min(...risks);
+    const note = el("div", "callout" + (spread < 0.5 ? " danger" : ""));
+    note.appendChild(el("b", null, num(risks.length) + " arquivos triados. "));
+    note.appendChild(el("span", null, spread < 0.5
+      ? "Os scores variam só " + spread.toFixed(2) + " ponto entre o menor e o maior: a triagem está dando praticamente a mesma nota para tudo, então nenhum limiar consegue separar PR arriscado de PR trivial. Vale revisar o prompt do Jev antes de confiar nesta economia."
+      : "Amplitude de " + spread.toFixed(2) + " ponto entre o menor e o maior score."));
+    host.appendChild(note);
+  }
+
+  function renderHotspots(runs) {
+    const host = $("hotspots");
+    const map = new Map();
+    runs.flatMap(findingsOf).forEach((f) => {
+      const k = f.file || "?";
+      const cur = map.get(k) || { weight: 0, count: 0 };
+      cur.weight += SEV_RANK[f.severity] || 0;
+      cur.count++;
+      map.set(k, cur);
+    });
+    const items = [...map.entries()]
+      .map(([file, v]) => ({ label: file, value: v.weight, tip: [["achados", String(v.count)]] }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 12);
+    clear(host);
+    if (!items.length) { host.appendChild(emptyBox("Nenhum achado registrado no filtro atual.")); return; }
+    barRows(host, items, (v) => String(v));
+  }
+
+  function renderRepro(runs) {
+    const host = $("repro");
+    clear(host);
+    const map = new Map();
+    runs.forEach((r) => {
+      findingsOf(r).forEach((f) => {
+        const k = [r.repo, r.pr, f.file, f.line].join("|");
+        if (!map.has(k)) map.set(k, []);
+        map.get(k).push({ run: r, f });
+      });
+    });
+    const repeated = [...map.values()].filter((g) => g.length > 1);
+    if (!repeated.length) {
+      host.appendChild(emptyBox("Medir reprodutibilidade exige o mesmo PR revisado ao menos duas vezes. Nenhum achado no filtro atual aparece em mais de uma execução."));
+      return;
+    }
+    const divergent = repeated.filter((g) => new Set(g.map((x) => x.f.severity)).size > 1);
+    const agree = (repeated.length - divergent.length) / repeated.length;
+
+    const kpi = el("div", "callout" + (agree < 1 ? " danger" : ""));
+    kpi.appendChild(el("b", null, pct(agree) + " de concordância. "));
+    kpi.appendChild(el("span", null,
+      divergent.length + " de " + repeated.length +
+      " achados vistos mais de uma vez receberam severidades diferentes entre execuções."));
+    host.appendChild(kpi);
+
+    divergent.forEach((g) => {
+      const first = g[0];
+      const row = el("div", "finding");
+      const loc = el("span", "loc", "PR #" + first.run.pr + " " + first.f.file + ":" + first.f.line);
+      const tags = el("span", "sev-tag");
+      g.forEach((x, i) => {
+        if (i) tags.appendChild(el("span", null, "vs"));
+        tags.appendChild(sevTag(x.f.severity));
+      });
+      const sameSha = new Set(g.map((x) => x.run.head_sha)).size === 1;
+      row.appendChild(tags);
+      row.appendChild(loc);
+      row.appendChild(el("span", null, sameSha
+        ? "mesmo commit — divergência pura do modelo"
+        : "commits diferentes — o código pode ter mudado entre as execuções"));
+      host.appendChild(row);
+    });
+  }
+
+  function renderRuns(runs) {
+    const host = $("runs");
+    clear(host);
+    if (!runs.length) { host.appendChild(emptyBox("Sem execuções no filtro atual.")); return; }
+
+    const cols = [
+      ["date", "Quando", false], ["pr", "PR", false], ["model", "Modelo", false],
+      ["cost", "Custo", true], ["dur", "Duração", true], ["size", "Linhas", true],
+      ["findings", "Achados", true], ["max", "Severidade máx.", false],
+    ];
+    const val = {
+      date: (r) => runDate(r) ? runDate(r).getTime() : 0,
+      pr: (r) => r.pr || 0,
+      model: (r) => r.model || "",
+      cost: (r) => r.claude_cost_usd || 0,
+      dur: (r) => r.duration_ms || 0,
+      size: (r) => diffLines(r) || 0,
+      findings: (r) => findingsOf(r).length,
+      max: (r) => Math.max(0, ...findingsOf(r).map((f) => SEV_RANK[f.severity] || 0)),
+    };
+    const sorted = runs.slice().sort((a, b) => {
+      const x = val[state.sort](a), y = val[state.sort](b);
+      return (x > y ? 1 : x < y ? -1 : 0) * state.dir;
+    });
+
+    const table = el("table");
+    const thead = el("thead");
+    const htr = el("tr");
+    cols.forEach(([key, label, isNum]) => {
+      const th = el("th", isNum ? "num" : null, label + (state.sort === key ? (state.dir > 0 ? " ↑" : " ↓") : ""));
+      th.setAttribute("data-sort", key);
+      th.addEventListener("click", () => {
+        if (state.sort === key) state.dir *= -1; else { state.sort = key; state.dir = -1; }
+        renderRuns(runs);
+      });
+      htr.appendChild(th);
+    });
+    thead.appendChild(htr);
+    table.appendChild(thead);
+
+    const tbody = el("tbody");
+    sorted.forEach((r) => {
+      const fs = findingsOf(r);
+      const maxSev = SEVERITIES.find((s) => fs.some((f) => f.severity === s));
+      const tr = el("tr", "run");
+      const d = runDate(r);
+      const cells = [
+        [d ? d.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }) : "—", false],
+        ["#" + (r.pr != null ? r.pr : "—"), false],
+        [r.model || "—", false],
+        [usd(r.claude_cost_usd), true],
+        [secs(r.duration_ms), true],
+        [diffLines(r) != null ? num(diffLines(r)) : "—", true],
+        [String(fs.length), true],
+      ];
+      cells.forEach(([t, isNum]) => tr.appendChild(el("td", isNum ? "num" : null, t)));
+      const sevCell = el("td");
+      if (maxSev) sevCell.appendChild(sevTag(maxSev)); else sevCell.textContent = "—";
+      tr.appendChild(sevCell);
+      tbody.appendChild(tr);
+
+      const detail = el("tr", "detail");
+      const dtd = el("td");
+      dtd.setAttribute("colspan", String(cols.length));
+      if (fs.length) {
+        fs.forEach((f) => {
+          const line = el("div", "finding");
+          line.appendChild(sevTag(f.severity));
+          line.appendChild(el("span", "loc", (f.file || "?") + ":" + (f.line != null ? f.line : "?")));
+          line.appendChild(el("span", null, f.message || ""));
+          dtd.appendChild(line);
+        });
+      } else {
+        dtd.appendChild(el("div", "empty", "Nenhum achado nesta execução."));
+      }
+      if (r.run_url) {
+        const a = el("a", null, "Ver execução no GitHub →");
+        a.href = r.run_url;
+        a.rel = "noopener noreferrer";
+        a.target = "_blank";
+        a.style.cssText = "display:inline-block;margin-top:10px;font-size:12px;color:var(--accent)";
+        dtd.appendChild(a);
+      }
+      detail.appendChild(dtd);
+      detail.style.display = "none";
+      tbody.appendChild(detail);
+
+      tr.addEventListener("click", () => {
+        detail.style.display = detail.style.display === "none" ? "table-row" : "none";
+      });
+    });
+    table.appendChild(tbody);
+    host.appendChild(table);
+  }
+
+  // -------------------------------------------------------------- filtros
+  function fillSelect(sel, values, label) {
+    clear(sel);
+    const all = el("option", null, label);
+    all.value = "all";
+    sel.appendChild(all);
+    values.forEach((v) => {
+      const o = el("option", null, v);
+      o.value = v;
+      sel.appendChild(o);
+    });
+  }
+
+  function renderAll() {
+    responsive.length = 0;
+    const runs = visible();
+    $("f-count").textContent = runs.length + " de " + RUNS.length + " execuções";
+    renderKpis(runs);
+    renderModels(runs);
+    renderSeverity(runs);
+    renderShadow(runs);
+    renderRiskDist(runs);
+    renderHotspots(runs);
+    renderRepro(runs);
+    renderRuns(runs);
+  }
+
+  function boot() {
+    const dates = RUNS.map(runDate).filter(Boolean).sort((a, b) => a - b);
+    $("subtitle").textContent = RUNS.length
+      ? RUNS.length + " execuções" + (dates.length
+          ? " · " + dates[0].toLocaleDateString("pt-BR") + " a " + dates[dates.length - 1].toLocaleDateString("pt-BR")
+          : "")
+      : "Nenhuma execução coletada ainda.";
+
+    fillSelect($("f-model"), [...new Set(RUNS.map((r) => r.model).filter(Boolean))].sort(), "Todos os modelos");
+    fillSelect($("f-repo"), [...new Set(RUNS.map((r) => r.repo).filter(Boolean))].sort(), "Todos os repositórios");
+    fillSelect($("f-range"), [], "Todo o período");
+    [["7", "Últimos 7 dias"], ["30", "Últimos 30 dias"], ["90", "Últimos 90 dias"]].forEach(([v, t]) => {
+      const o = el("option", null, t);
+      o.value = v;
+      $("f-range").appendChild(o);
+    });
+
+    $("f-model").addEventListener("change", (e) => { state.model = e.target.value; renderAll(); });
+    $("f-repo").addEventListener("change", (e) => { state.repo = e.target.value; renderAll(); });
+    $("f-range").addEventListener("change", (e) => { state.range = e.target.value; renderAll(); });
+    $("thr").addEventListener("input", (e) => {
+      state.threshold = parseFloat(e.target.value);
+      $("thr-read").textContent = state.threshold.toFixed(1);
+      responsive.length = 0;
+      renderShadow(visible());
+    });
+    $("theme-toggle").addEventListener("click", () => {
+      const cur = document.documentElement.getAttribute("data-theme");
+      const isDark = cur ? cur === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+      document.documentElement.setAttribute("data-theme", isDark ? "light" : "dark");
+      responsive.forEach((c) => c.draw(c.host, c.host.clientWidth || 640));
+    });
+
+    renderAll();
+  }
+
+  boot();
+})();
+</script>
+</body>
+</html>
