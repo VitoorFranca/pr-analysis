@@ -207,15 +207,20 @@ runs:
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
         MODEL: ${{ inputs.model }}
       run: |
-        timeout 600 claude -p "$(cat "$RUNNER_TEMP/prompt.txt")" \
+        timeout 600 claude -p \
           --model "$MODEL" \
           --allowedTools "Read,Grep,Glob" \
           --permission-mode dontAsk \
           --max-turns 5 \
           --output-format json \
+          < "$RUNNER_TEMP/prompt.txt" \
           > "$RUNNER_TEMP/raw.json"
 
-        cat "$RUNNER_TEMP/raw.json"
+        if [ "$(jq -r '.is_error' "$RAW")" != "false" ]; then
+          echo "Execução falhou:"
+          cat "$RAW"
+          exit 1
+        fi
     
     - name: Parse review
       id: review
