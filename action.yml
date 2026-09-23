@@ -234,7 +234,9 @@ runs:
         BODY="$RUNNER_TEMP/review.md"
 
         if [ "$(jq -r '.is_error' "$RAW")" != "false" ]; then
-          echo "Execução falhou"; exit 1
+          echo "Execução falhou:"
+          cat "$RAW"
+          exit 1
         fi
 
         jq -r '.result' "$RAW" \
